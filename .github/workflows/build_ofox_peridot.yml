@@ -16,9 +16,13 @@ jobs:
       DEVICE_CODENAME: peridot
       DEVICE_TREE_URL: https://github.com/KazeTheLight/ofox_device_xiaomi_peridot
       DEVICE_TREE_BRANCH: fox_14.1
-      FOX_SYNC_PATH: ${{ github.workspace }}/fox_14.1
 
     steps:
+      # ─── Set dynamic env vars ──────────────────────────────────────────────
+      - name: Set environment variables
+        run: |
+          echo "FOX_SYNC_PATH=$GITHUB_WORKSPACE/fox_14.1" >> $GITHUB_ENV
+
       # ─── Maximize disk space ───────────────────────────────────────────────
       - name: Maximize disk space
         uses: easimon/maximize-build-space@master
@@ -66,13 +70,12 @@ jobs:
       # ─── Sync OrangeFox via orangefox_sync.sh ─────────────────────────────
       - name: Clone OrangeFox sync script
         run: |
-          mkdir -p ${{ github.workspace }}/ofox_sync
           git clone https://gitlab.com/OrangeFox/sync.git \
-            ${{ github.workspace }}/ofox_sync --depth=1
+            $GITHUB_WORKSPACE/ofox_sync --depth=1
 
       - name: Run orangefox_sync.sh
         run: |
-          cd ${{ github.workspace }}/ofox_sync
+          cd $GITHUB_WORKSPACE/ofox_sync
           chmod +x orangefox_sync.sh
           ./orangefox_sync.sh --branch 14.1 --path ${{ env.FOX_SYNC_PATH }}
 
@@ -99,63 +102,20 @@ jobs:
 
           source build/envsetup.sh
           lunch twrp_${{ env.DEVICE_CODENAME }}-ap2a-eng
-          mka adbd recoveryimage 2>&1 | tee ${{ github.workspace }}/build.log
+          mka adbd recoveryimage 2>&1 | tee $GITHUB_WORKSPACE/build.log
 
       # ─── Collect Output ────────────────────────────────────────────────────
       - name: Collect output files
         run: |
-          mkdir -p ${{ github.workspace }}/output
+          mkdir -p $GITHUB_WORKSPACE/output
           find ${{ env.FOX_SYNC_PATH }}/out/target/product/${{ env.DEVICE_CODENAME }} \
             -maxdepth 1 \
             \( -name "OrangeFox*.zip" \
                -o -name "OrangeFox*.img" \
                -o -name "recovery.img" \) \
-            -exec cp {} ${{ github.workspace }}/output/ \; || true
+            -exec cp {} $GITHUB_WORKSPACE/output/ \; || true
           echo "=== Output files ==="
-          ls -lh ${{ github.workspace }}/output/ || echo "No output files found!"
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: ${{ github.workspace }}/build.log
-          retention-days: 3
-
-      - name: Upload recovery artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: OrangeFox-peridot-${{ github.run_number }}
-          path: ${{ github.workspace }}/output/
-          retention-days: 7
-
-      # ─── Release (opsional) ────────────────────────────────────────────────
-      - name: Create GitHub Release
-        if: ${{ github.event.inputs.RELEASE_TAG != '' }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.event.inputs.RELEASE_TAG }}
-          name: "OrangeFox Recovery - Xiaomi Peridot (${{ github.event.inputs.RELEASE_TAG }})"
-          body: |
-            ## OrangeFox Recovery for Xiaomi Peridot
-
-            **Branch:** `fox_14.1`
-            **Device Tree:** ${{ env.DEVICE_TREE_URL }}
-
-            ### Cara Flash
-            1. Boot ke fastboot mode
-            2. `fastboot flash recovery recovery.img`
-            3. Reboot ke recovery
-
-            > ⚠️ Backup data sebelum flash!
-          files: ${{ github.workspace }}/output/*
-          draft: false
-          prerelease: true            \( -name "OrangeFox*.zip" \
-               -o -name "OrangeFox*.img" \
-               -o -name "recovery.img" \) \
-            -exec cp {} ${{ github.workspace }}/output/ \; || true
-          echo "=== Output files ==="
-          ls -lh ${{ github.workspace }}/output/ || echo "No output files found!"
+          ls -lh $GITHUB_WORKSPACE/output/ || echo "No output files found!"
 
       - name: Upload build log
         if: always()

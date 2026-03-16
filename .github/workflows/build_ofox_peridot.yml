@@ -15,7 +15,7 @@ on:
 jobs:
   build:
     name: Build OrangeFox for peridot
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     env:
       DEVICE_CODENAME: peridot
       DEVICE_TREE_URL: https://github.com/KazeTheLight/ofox_device_xiaomi_peridot
@@ -33,12 +33,13 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y \
             git-core gnupg flex bison build-essential zip curl \
-            zlib1g-dev libc6-dev-i386 libncurses5 lib32ncurses5-dev \
-            x11proto-core-dev libx11-dev lib32z1-dev libgl1-mesa-dev \
+            zlib1g-dev libc6-dev-i386 lib32ncurses5-dev \
+            x11proto-core-dev libx11-dev lib32z1-dev \
             libxml2-utils xsltproc unzip fontconfig python3 python-is-python3 \
-            libssl-dev repo schedtool ccache lzop bc binfmt-support \
-            patchelf gperf liblz4-tool libsdl1.2-dev squashfs-tools \
-            python3-pip openjdk-11-jdk rsync
+            libssl-dev schedtool ccache lzop bc \
+            patchelf gperf liblz4-tool squashfs-tools \
+            python3-pip openjdk-11-jdk rsync libelf-dev \
+            libncurses5 libncurses5-dev
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2

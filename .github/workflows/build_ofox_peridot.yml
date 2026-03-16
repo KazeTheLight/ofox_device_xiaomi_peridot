@@ -3,12 +3,8 @@ name: Build OrangeFox Recovery - Xiaomi Peridot
 on:
   workflow_dispatch:
     inputs:
-      SYNC_DEPTH:
-        description: "Repo sync depth (1 = shallow, lebih cepat)"
-        required: false
-        default: "1"
       RELEASE_TAG:
-        description: "Tag untuk release (kosongkan jika tidak mau upload)"
+        description: "Tag untuk GitHub Release (kosongkan jika skip release)"
         required: false
         default: ""
 
@@ -20,12 +16,22 @@ jobs:
       DEVICE_CODENAME: peridot
       DEVICE_TREE_URL: https://github.com/KazeTheLight/ofox_device_xiaomi_peridot
       DEVICE_TREE_BRANCH: fox_14.1
-      OFOX_BRANCH: fox_14.1
-      BUILD_TARGET: recoveryimage
+      FOX_SYNC_PATH: ${{ github.workspace }}/fox_14.1
 
     steps:
+      # ─── Maximize disk space ───────────────────────────────────────────────
+      - name: Maximize disk space
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 4096
+          swap-size-mb: 8192
+          remove-dotnet: "true"
+          remove-android: "true"
+          remove-haskell: "true"
+          remove-codeql: "true"
+
       # ─── Setup Environment ─────────────────────────────────────────────────
-      - name: Checkout (untuk akses secrets & workflows)
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup build environment
@@ -35,88 +41,88 @@ jobs:
             git-core gnupg flex bison build-essential zip curl \
             zlib1g-dev libc6-dev-i386 lib32ncurses5-dev \
             x11proto-core-dev libx11-dev lib32z1-dev \
-            libxml2-utils xsltproc unzip fontconfig python3 python-is-python3 \
+            libxml2-utils xsltproc unzip fontconfig \
+            python3 python-is-python3 python3-pip \
             libssl-dev schedtool ccache lzop bc \
             patchelf gperf liblz4-tool squashfs-tools \
-            python3-pip openjdk-11-jdk rsync libelf-dev \
-            libncurses5 libncurses5-dev
+            openjdk-11-jdk rsync libelf-dev \
+            libncurses5 libncurses5-dev aria2
 
       - name: Setup ccache
         uses: hendrikmuhs/ccache-action@v1.2
         with:
-          max-size: "5G"
-          key: ofox-peridot-${{ env.OFOX_BRANCH }}
+          max-size: "10G"
+          key: ofox-peridot-fox14.1
 
-      # ─── Repo Init & Sync ──────────────────────────────────────────────────
       - name: Setup repo tool
         run: |
           mkdir -p ~/bin
           curl https://storage.googleapis.com/git-repo-downloads/repo > ~/bin/repo
           chmod a+x ~/bin/repo
           echo "$HOME/bin" >> $GITHUB_PATH
-
-      - name: Initialize OrangeFox manifest
-        run: |
-          mkdir -p ${{ github.workspace }}/OrangeFox
-          cd ${{ github.workspace }}/OrangeFox
           git config --global user.email "github-actions@github.com"
           git config --global user.name "GitHub Actions"
-          repo init \
-            -u https://gitlab.com/OrangeFox/sync.git \
-            -b ${{ env.OFOX_BRANCH }} \
-            --depth=${{ github.event.inputs.SYNC_DEPTH }}
 
-      - name: Sync OrangeFox sources
+      # ─── Sync OrangeFox via orangefox_sync.sh ─────────────────────────────
+      - name: Clone OrangeFox sync script
         run: |
-          cd ${{ github.workspace }}/OrangeFox
-          repo sync \
-            -c --no-clone-bundle --no-tags \
-            --optimized-fetch --prune \
-            -j$(nproc --all)
+          mkdir -p ${{ github.workspace }}/ofox_sync
+          git clone https://gitlab.com/OrangeFox/sync.git \
+            ${{ github.workspace }}/ofox_sync --depth=1
+
+      - name: Run orangefox_sync.sh
+        run: |
+          cd ${{ github.workspace }}/ofox_sync
+          chmod +x orangefox_sync.sh
+          ./orangefox_sync.sh --branch 14.1 --path ${{ env.FOX_SYNC_PATH }}
 
       # ─── Clone Device Tree ─────────────────────────────────────────────────
       - name: Clone device tree
         run: |
-          cd ${{ github.workspace }}/OrangeFox
           git clone \
             ${{ env.DEVICE_TREE_URL }} \
             --branch ${{ env.DEVICE_TREE_BRANCH }} \
             --depth=1 \
-            device/xiaomi/${{ env.DEVICE_CODENAME }}
+            ${{ env.FOX_SYNC_PATH }}/device/xiaomi/${{ env.DEVICE_CODENAME }}
 
       # ─── Build ─────────────────────────────────────────────────────────────
-      - name: Set up build environment & build
+      - name: Build OrangeFox
         run: |
-          cd ${{ github.workspace }}/OrangeFox
+          cd ${{ env.FOX_SYNC_PATH }}
           export USE_CCACHE=1
           export CCACHE_EXEC=$(which ccache)
           export ALLOW_MISSING_DEPENDENCIES=true
           export FOX_BUILD_DEVICE=${{ env.DEVICE_CODENAME }}
+          export FOX_AB_DEVICE=1
+          export FOX_VIRTUAL_AB_DEVICE=1
           export LC_ALL=C
 
           source build/envsetup.sh
           lunch twrp_${{ env.DEVICE_CODENAME }}-eng
-
-          mka adbd ${{ env.BUILD_TARGET }}
+          mka adbd recoveryimage 2>&1 | tee ${{ github.workspace }}/build.log
 
       # ─── Collect Output ────────────────────────────────────────────────────
-      - name: Find and collect recovery image
+      - name: Collect output files
         run: |
-          cd ${{ github.workspace }}/OrangeFox
           mkdir -p ${{ github.workspace }}/output
-
-          # Cari file output OrangeFox
-          find out/target/product/${{ env.DEVICE_CODENAME }} \
+          find ${{ env.FOX_SYNC_PATH }}/out/target/product/${{ env.DEVICE_CODENAME }} \
             -maxdepth 1 \
             \( -name "OrangeFox*.zip" \
-               -o -name "recovery.img" \
-               -o -name "boot.img" \) \
-            -exec cp {} ${{ github.workspace }}/output/ \;
-
+               -o -name "OrangeFox*.img" \
+               -o -name "recovery.img" \) \
+            -exec cp {} ${{ github.workspace }}/output/ \; || true
           echo "=== Output files ==="
-          ls -lh ${{ github.workspace }}/output/
+          ls -lh ${{ github.workspace }}/output/ || echo "No output files found!"
 
-      - name: Upload artifact
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: ${{ github.workspace }}/build.log
+          retention-days: 3
+
+      - name: Upload recovery artifact
         uses: actions/upload-artifact@v4
         with:
           name: OrangeFox-peridot-${{ github.run_number }}
@@ -131,18 +137,17 @@ jobs:
           tag_name: ${{ github.event.inputs.RELEASE_TAG }}
           name: "OrangeFox Recovery - Xiaomi Peridot (${{ github.event.inputs.RELEASE_TAG }})"
           body: |
-            ## OrangeFox Recovery for Xiaomi Peridot (peridot)
+            ## OrangeFox Recovery for Xiaomi Peridot
 
-            **Branch:** `${{ env.OFOX_BRANCH }}`
+            **Branch:** `fox_14.1`
             **Device Tree:** ${{ env.DEVICE_TREE_URL }}
-            **Build Date:** ${{ github.run_number }}
 
             ### Cara Flash
-            1. Boot ke fastboot
+            1. Boot ke fastboot mode
             2. `fastboot flash recovery recovery.img`
-            3. Atau gunakan `.zip` via sideload
+            3. Reboot ke recovery
 
-            > ⚠️ Pastikan backup sebelum flash!
+            > ⚠️ Backup data sebelum flash!
           files: ${{ github.workspace }}/output/*
           draft: false
-          prerelease: false
+          prerelease: true
